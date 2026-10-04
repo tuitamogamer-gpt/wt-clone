@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="700" height="550" viewBox="0 0 700 550" fill="none">
+  <defs>
+    <linearGradient id="wing-left" x1="150" y1="153" x2="351" y2="307" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFEE"/><stop offset=".56" stop-color="#F7F5D9"/><stop offset="1" stop-color="#E4E0BD"/>
+    </linearGradient>
+    <linearGradient id="wing-right" x1="533" y1="154" x2="425" y2="377" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFF3"/><stop offset=".56" stop-color="#F6F4DA"/><stop offset="1" stop-color="#E4DFAF"/>
+    </linearGradient>
+    <linearGradient id="fold" x1="474" y1="172" x2="298" y2="313" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#AAA984"/><stop offset=".5" stop-color="#666951"/><stop offset="1" stop-color="#323A30"/>
+    </linearGradient>
+    <linearGradient id="fold-light" x1="311" y1="345" x2="412" y2="238" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#CEC9A4"/><stop offset="1" stop-color="#F0EDCD"/>
+    </linearGradient>
+    <linearGradient id="ribbon" x1="61" y1="389" x2="349" y2="425" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B6A1E9"/><stop offset=".46" stop-color="#D1BFF7"/><stop offset=".78" stop-color="#BBA3ED"/><stop offset="1" stop-color="#9D83D3"/>
+    </linearGradient>
+    <linearGradient id="ribbon-back" x1="215" y1="293" x2="273" y2="399" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B7A2E8"/><stop offset="1" stop-color="#7965B0"/>
+    </linearGradient>
+    <radialGradient id="ground" cx="0" cy="0" r="1" gradientTransform="translate(395 438) rotate(1) scale(173 23)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4A4C2D" stop-opacity=".11"/><stop offset="1" stop-color="#4A4C2D" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="paper-shadow" x="65" y="61" width="618" height="379" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="bg"/><feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="alpha"/><feOffset dy="14"/><feGaussianBlur stdDeviation="11"/><feComposite in2="alpha" operator="out"/><feColorMatrix type="matrix" values="0 0 0 0 0.18 0 0 0 0 0.20 0 0 0 0 0.11 0 0 0 .12 0"/><feBlend in2="bg" mode="normal"/><feBlend in="SourceGraphic" mode="normal"/>
+    </filter>
+  </defs>
+
+  <ellipse cx="395" cy="438" rx="184" ry="29" fill="url(#ground)"/>
+
+  <!-- A broad paper ribbon curls through the space behind the plane. -->
+  <path d="M293 270C271 283 227 306 206 337C186 366 200 397 232 404C264 411 297 395 313 377L335 393C308 425 256 441 215 421C167 398 169 350 198 317C225 287 260 275 293 270Z" fill="url(#ribbon-back)"/>
+  <path d="M46 434C48 385 99 352 150 359C203 366 209 421 258 435C310 450 357 421 361 382L382 377C385 421 339 463 282 466C222 470 191 434 169 410C148 387 131 382 110 387C84 393 68 415 67 444L46 434Z" fill="url(#ribbon)"/>
+  <path d="M46 434C48 385 99 352 150 359C203 366 209 421 258 435C310 450 357 421 361 382" stroke="#DFD2F8" stroke-width="1.6"/>
+  <path d="M67 444L46 434L44 457L64 468L67 444Z" fill="#8C74C0"/>
+  <path d="M169 410C191 434 222 470 282 466" stroke="#9E86CF" stroke-opacity=".45"/>
+
+  <!-- Folded cream paper, with a deep central crease. -->
+  <g filter="url(#paper-shadow)">
+    <path d="M109 203L625 108L439 373L342 269L281 345L281 252L109 203Z" fill="#D5D1AD"/>
+    <path d="M109 203L625 108L310 254L109 203Z" fill="url(#wing-left)"/>
+    <path d="M109 203L310 254L308 259L111 206L109 203Z" fill="#CECBA5"/>
+    <path d="M625 108L310 254L281 345L352 272L625 108Z" fill="url(#fold)"/>
+    <path d="M281 345L310 254L329 281L281 345Z" fill="url(#fold-light)"/>
+    <path d="M625 108L352 272L439 373L625 108Z" fill="url(#wing-right)"/>
+    <path d="M352 272L439 373L440 366L359 272L625 108L352 272Z" fill="#E4E0BD"/>
+    <path d="M110 203L625 108L310 254" stroke="#FFFFF5" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M625 108L352 272L439 373" stroke="#FFFFF4" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M310 254L281 345" stroke="#84856A" stroke-width="1"/>
+    <path d="M625 108L326 251" stroke="#CFCEAF" stroke-width=".75" opacity=".65"/>
+  </g>
+
+  <!-- Little sparks of a good idea. -->
+  <path d="M564 342C565 361 571 368 589 371C571 374 565 381 563 400C561 381 555 374 537 371C555 368 561 361 564 342Z" fill="#C1D845"/>
+  <path d="M194 98C195 109 198 113 209 115C198 117 195 121 194 132C192 121 189 117 178 115C189 113 192 109 194 98Z" fill="#B9CE3B"/>
+  <path d="M608 243C609 250 611 253 618 254C611 256 609 258 608 265C607 258 605 256 598 254C605 253 607 250 608 243Z" fill="#B9CE3B"/>
+  <circle cx="512" cy="70" r="4.5" fill="#B5A0DF"/>
+  <circle cx="128" cy="300" r="3.5" fill="#BBCD55"/>
+
+  <!-- A small sheet catches the same breeze. -->
+  <g transform="translate(481 430) rotate(-18)">
+    <path d="M0 0H31L42 12V52H0V0Z" fill="#F0EECF" stroke="#D8D8BA" stroke-width="1"/>
+    <path d="M31 0V12H42L31 0Z" fill="#D6D2AE"/>
+    <path d="M8 22H32M8 29H32M8 36H23" stroke="#AAA98B" stroke-width="1.4" stroke-linecap="round"/>
+  </g>
+</svg>
