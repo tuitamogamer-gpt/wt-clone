@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { DragEvent, FormEvent, ReactNode } from "react";
 import { createTransfer } from "./create-transfer";
 import type { Transfer } from "./create-transfer";
+import { useTransferService } from "./use-transfer-service";
+import {
+  canPreview,
+  readDroppedFiles,
+  formatFileCount,
+} from "./file-selection";
+import { FilePreview, FileThumbnail } from "./components/FilePreview";
+import { TransferHistory } from "./components/TransferHistory";
+import { readHistory as getHistory, saveHistory } from "./history";
 import {
   ArrowUpRight,
   ArrowRight,
@@ -29,7 +38,12 @@ import {
   Send,
   CircleHelp,
   Sparkles,
-  ExternalLink,
+  CloudOff,
+  WifiOff,
+  RefreshCw,
+  Upload,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
 type ModalName =
@@ -56,13 +70,6 @@ function formatDate(date: string) {
 }
 function transferUrl(id: string) {
   return `${window.location.origin}/t/${id}`;
-}
-function getHistory(): Transfer[] {
-  try {
-    return JSON.parse(localStorage.getItem("we-transfer-history") || "[]");
-  } catch {
-    return [];
-  }
 }
 function FileIcon({ name }: { name: string }) {
   const ext = name.split(".").pop()?.toLowerCase() || "";
@@ -101,9 +108,11 @@ function Modal({
     const handler = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
       if (event.key === "Tab") {
-        const nodes = ref.current?.querySelectorAll<HTMLElement>(
-          'button, input, select, textarea, a[href], [tabindex="0"]',
-        );
+        const nodes = Array.from(
+          ref.current?.querySelectorAll<HTMLElement>(
+            'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]',
+          ) || [],
+        ).filter((node) => node.getClientRects().length > 0);
         if (!nodes?.length) return;
         const first = nodes[0],
           last = nodes[nodes.length - 1];
@@ -166,6 +175,8 @@ export default function App() {
   const [modal, setModal] = useState<ModalName>(null);
   const [mode, setMode] = useState<"link" | "email">("link");
   const [files, setFiles] = useState<File[]>([]);
+  const latestFiles = useRef(files);
+  latestFiles.current = files;
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
   const [sender, setSender] = useState("");
@@ -182,13 +193,31 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   const [toast, setToast] = useState("");
   const [history, setHistory] = useState<Transfer[]>(getHistory);
-  const [theme, setTheme] = useState("sage");
+  const [theme, setTheme] = useState(() => {
+    try {
+      const saved = localStorage.getItem("wt-theme");
+      return saved && ["sage", "lilac", "peach"].includes(saved)
+        ? saved
+        : "sage";
+    } catch {
+      return "sage";
+    }
+  });
+  const { state: serviceState, check: checkService } = useTransferService();
+  const [previewFile, setPreviewFile] = useState<File | null>(null);
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [readingDrop, setReadingDrop] = useState(false);
+  const dragDepth = useRef(0);
   const [faq, setFaq] = useState<number | null>(0);
   const [downloadTransfer, setDownloadTransfer] = useState<Transfer | null>(
     null,
   );
   const [downloadLoading, setDownloadLoading] = useState(false);
   const [downloadError, setDownloadError] = useState("");
+  const [downloadFailure, setDownloadFailure] = useState<
+    "missing" | "unavailable"
+  >("missing");
+  const [downloadRetry, setDownloadRetry] = useState(0);
   const [unlockPassword, setUnlockPassword] = useState("");
   const [token, setToken] = useState("");
   const [unlocking, setUnlocking] = useState(false);
@@ -201,6 +230,61 @@ export default function App() {
   )?.[1];
 
   useEffect(() => {
+    const clearDrag = () => {
+      dragDepth.current = 0;
+      setDragging(false);
+    };
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") clearDrag();
+    };
+    window.addEventListener("blur", clearDrag);
+    window.addEventListener("dragend", clearDrag);
+    window.addEventListener("keydown", onEscape);
+    return () => {
+      window.removeEventListener("blur", clearDrag);
+      window.removeEventListener("dragend", clearDrag);
+      window.removeEventListener("keydown", onEscape);
+    };
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem("wt-theme", theme);
+    } catch {
+      /* Preferences are optional. */
+    }
+  }, [theme]);
+  useEffect(() => {
+    const syncHistory = (event: StorageEvent) => {
+      if (event.key === "we-transfer-history") setHistory(getHistory());
+    };
+    window.addEventListener("storage", syncHistory);
+    return () => window.removeEventListener("storage", syncHistory);
+  }, []);
+  useEffect(() => {
+    if (status !== "uploading") return;
+    const preventLeaving = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", preventLeaving);
+    return () => window.removeEventListener("beforeunload", preventLeaving);
+  }, [status]);
+  useEffect(() => () => uploadController.current?.abort(), []);
+  useEffect(() => {
+    if (!token || !downloadTransfer?.requiresPassword) return;
+    const expiresAt = Number(token.split(".").at(-2));
+    if (!Number.isFinite(expiresAt)) return;
+    const timeout = window.setTimeout(
+      () => {
+        setToken("");
+        setUnlockPassword("");
+        setDownloadError("Za nastavak ponovno unesi lozinku.");
+      },
+      Math.max(0, expiresAt - Date.now()),
+    );
+    return () => clearTimeout(timeout);
+  }, [token, downloadTransfer?.requiresPassword]);
+  useEffect(() => {
     if (toast) {
       const timer = window.setTimeout(() => setToast(""), 3500);
       return () => clearTimeout(timer);
@@ -210,25 +294,38 @@ export default function App() {
     if (!downloadId) return;
     const controller = new AbortController();
     setDownloadLoading(true);
+    setDownloadError("");
     fetch(`/api/transfers/${downloadId}`, { signal: controller.signal })
       .then(async (response) => {
         const data = await response.json();
         if (!response.ok)
-          throw new Error(data.error || "Prijenos nije dostupan.");
+          throw Object.assign(
+            new Error(data.error || "Prijenos nije dostupan."),
+            { status: response.status },
+          );
         setDownloadTransfer(data);
       })
       .catch((err) => {
-        if (err.name !== "AbortError") setDownloadError(err.message);
+        if (err.name !== "AbortError") {
+          setDownloadFailure(
+            [404, 410].includes(err.status) ? "missing" : "unavailable",
+          );
+          setDownloadError(
+            [404, 410].includes(err.status)
+              ? err.message
+              : "Ne možemo dohvatiti datoteke. Pokušaj ponovno za koji trenutak.",
+          );
+        }
       })
       .finally(() => {
         if (!controller.signal.aborted) setDownloadLoading(false);
       });
     return () => controller.abort();
-  }, [downloadId]);
+  }, [downloadId, downloadRetry]);
 
   function addFiles(incoming: FileList | File[]) {
     setError("");
-    const next = [...files];
+    const next = [...latestFiles.current];
     for (const file of Array.from(incoming)) {
       if (
         !next.some(
@@ -250,6 +347,36 @@ export default function App() {
       return;
     }
     setFiles(next);
+  }
+  function updateHistory(items: Transfer[]) {
+    setHistory(items);
+    saveHistory(items);
+  }
+  function isFileDrag(event: DragEvent) {
+    return Array.from(event.dataTransfer.types).includes("Files");
+  }
+  const canDrop =
+    !downloadId && status === "idle" && !modal && !previewFile && !readingDrop;
+  async function dropFiles(event: DragEvent) {
+    if (!isFileDrag(event)) return;
+    event.preventDefault();
+    dragDepth.current = 0;
+    setDragging(false);
+    if (!canDrop) return;
+    setReadingDrop(true);
+    try {
+      const dropped = await readDroppedFiles(event.dataTransfer);
+      if (!dropped.length) throw new Error("U odabranoj mapi nema datoteka.");
+      addFiles(dropped);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Nije moguće otvoriti ovu mapu. Pokušaj s odabirom datoteka.",
+      );
+    } finally {
+      setReadingDrop(false);
+    }
   }
   async function copyLink(id: string) {
     const url = transferUrl(id);
@@ -283,10 +410,15 @@ export default function App() {
     setCreated(null);
     setProgress(0);
     setPassword("");
+    setPasswordVisible(false);
   }
   async function upload(event: FormEvent) {
     event.preventDefault();
     setError("");
+    if (serviceState !== "ready" || readingDrop) {
+      void checkService();
+      return;
+    }
     if (!files.length) {
       inputRef.current?.click();
       return;
@@ -315,21 +447,18 @@ export default function App() {
       setCreated(data);
       setStatus("success");
       const updated = [data, ...getHistory()].slice(0, 30);
-      setHistory(updated);
-      try {
-        localStorage.setItem("we-transfer-history", JSON.stringify(updated));
-      } catch {
-        /* History is optional. */
-      }
+      updateHistory(updated);
     } catch (err) {
       setStatus("idle");
       setProgress(0);
-      if (!controller.signal.aborted)
+      if (!controller.signal.aborted) {
+        void checkService();
         setError(
           err instanceof Error
             ? err.message
             : "Prijenos nije uspio. Pokušaj ponovno.",
         );
+      }
     } finally {
       if (uploadController.current === controller)
         uploadController.current = null;
@@ -358,24 +487,57 @@ export default function App() {
   const emailHref = created
     ? `mailto:${encodeURIComponent(recipient)}?subject=${encodeURIComponent(created.title || "Datoteke za tebe")}&body=${encodeURIComponent(`${message ? message + "\n\n" : ""}Preuzmi datoteke: ${transferUrl(created.id)}\n\nPoveznica vrijedi do ${formatDate(created.expiresAt)}.\n${sender ? "Šalje: " + sender : ""}`)}`
     : "#";
-  const closeModal = useCallback(() => setModal(null), []);
+  const closeModal = useCallback(() => {
+    setModal(null);
+    setPasswordVisible(false);
+  }, []);
+  const closePreview = useCallback(() => setPreviewFile(null), []);
 
   return (
-    <div className={`app theme-${theme}`}>
+    <div
+      className={`app theme-${theme}`}
+      onDragEnter={(event) => {
+        if (isFileDrag(event)) {
+          event.preventDefault();
+          if (canDrop) {
+            dragDepth.current += 1;
+            setDragging(true);
+          }
+        }
+      }}
+      onDragOver={(event) => {
+        if (isFileDrag(event)) {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = canDrop ? "copy" : "none";
+        }
+      }}
+      onDragLeave={(event) => {
+        if (isFileDrag(event)) {
+          dragDepth.current = Math.max(0, dragDepth.current - 1);
+          if (!dragDepth.current) setDragging(false);
+        }
+      }}
+      onDrop={dropFiles}
+    >
+      {dragging && canDrop && (
+        <div className="page-drop-overlay" aria-hidden="true">
+          <div>
+            <Upload size={42} strokeWidth={1.5} />
+            <h2>Pusti ideje ovdje.</h2>
+            <p>Datoteke ili cijela mapa. Do 2 GB.</p>
+          </div>
+        </div>
+      )}
       <header className="header">
-        <a className="brand" href="/" aria-label="WeTransfer početna">
-          <svg viewBox="0 0 72 40" aria-hidden="true">
-            <path
-              d="M3 8h10l5 18 6-18h9l6 18 4-18h10L42 38H32l-4-15-5 15H13L3 8Z"
-              fill="currentColor"
-            />
-            <path
-              d="M50 24c0-11 7-17 15-17 9 0 14 7 14 16v4H60c1 4 6 5 12 1l5 6c-11 9-27 4-27-10Zm10-3h10c-1-6-9-6-10 0Z"
-              fill="currentColor"
-              transform="translate(-8 0)"
-            />
-          </svg>
-          <span>WeTransfer</span>
+        <a className="brand" href="/" aria-label="WT Transfer početna">
+          <span className="brand-mark">
+            wt<span>.</span>
+          </span>
+          <span className="brand-caption">
+            transfer
+            <br />
+            <small>IDEJE U POKRETU</small>
+          </span>
         </a>
         <nav className="nav" aria-label="Glavna navigacija">
           <button onClick={() => setModal("how")}>
@@ -406,6 +568,36 @@ export default function App() {
             className="transfer-column"
             aria-label={downloadId ? "Preuzimanje datoteka" : "Novi prijenos"}
           >
+            {!downloadId &&
+              (serviceState === "unavailable" ||
+                serviceState === "offline") && (
+                <div className="service-notice" role="status">
+                  <span className="service-notice-icon">
+                    {serviceState === "offline" ? (
+                      <WifiOff size={19} />
+                    ) : (
+                      <CloudOff size={19} />
+                    )}
+                  </span>
+                  <div>
+                    <strong>
+                      {serviceState === "offline"
+                        ? "Nema internetske veze"
+                        : "Slanje je trenutačno na pauzi"}
+                    </strong>
+                    <p>
+                      Možeš odabrati i pregledati datoteke. Ostaju samo na tvom
+                      uređaju.
+                    </p>
+                    <button
+                      className="notice-retry"
+                      onClick={() => void checkService()}
+                    >
+                      <RefreshCw size={13} /> Provjeri ponovno
+                    </button>
+                  </div>
+                </div>
+              )}
             <div className="transfer-card">
               {downloadId ? (
                 <div className="download-content">
@@ -470,8 +662,10 @@ export default function App() {
                             </p>
                           )}
                           <p className="download-meta">
-                            {downloadTransfer.files?.length} datoteka ·{" "}
-                            {formatBytes(downloadTransfer.totalSize || 0)}
+                            {formatFileCount(
+                              downloadTransfer.files?.length || 0,
+                            )}{" "}
+                            · {formatBytes(downloadTransfer.totalSize || 0)}
                           </p>
                           <div className="download-files">
                             {downloadTransfer.files?.map((file) => (
@@ -511,14 +705,27 @@ export default function App() {
                       <div className="success-icon">
                         <Link size={30} />
                       </div>
-                      <h2>Ova je pošiljka otputovala.</h2>
+                      <h2>
+                        {downloadFailure === "missing"
+                          ? "Ova je pošiljka otputovala."
+                          : "Veza je nakratko zastala."}
+                      </h2>
                       <p>
                         {downloadError ||
                           "Poveznica je istekla ili ne postoji."}
                       </p>
-                      <a className="primary-button" href="/">
-                        Napravi novi prijenos <ArrowRight size={18} />
-                      </a>
+                      {downloadFailure === "unavailable" ? (
+                        <button
+                          className="primary-button"
+                          onClick={() => setDownloadRetry((value) => value + 1)}
+                        >
+                          Pokušaj ponovno <RefreshCw size={18} />
+                        </button>
+                      ) : (
+                        <a className="primary-button" href="/">
+                          Napravi novi prijenos <ArrowRight size={18} />
+                        </a>
+                      )}
                     </div>
                   )}
                 </div>
@@ -549,7 +756,7 @@ export default function App() {
                       : "Ostavi ovaj prozor otvoren dok se datoteke učitavaju."}
                   </p>
                   <div className="upload-stats">
-                    <span>{files.length} datoteka</span>
+                    <span>{formatFileCount(files.length)}</span>
                     <span>{formatBytes(totalSize)}</span>
                   </div>
                   <div className="progress-track">
@@ -580,7 +787,7 @@ export default function App() {
                     <div>
                       <File size={19} />
                       <span>
-                        {created.files.length} datoteka ·{" "}
+                        {formatFileCount(created.files.length)} ·{" "}
                         {formatBytes(created.totalSize)}
                       </span>
                     </div>
@@ -637,32 +844,16 @@ export default function App() {
                     <span className="small-star">
                       <Sparkles size={15} />
                     </span>
-                    <span>OD TVOJIH RUKU. DO NJIHOVIH.</span>
+                    <span>TVOJE DATOTEKE. NJIHOV SLJEDEĆI KORAK.</span>
                   </div>
                   <div
                     className={`drop-zone ${dragging ? "is-dragging" : ""} ${files.length ? "has-files" : ""}`}
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      setDragging(true);
-                    }}
-                    onDragLeave={(e) => {
-                      if (!e.currentTarget.contains(e.relatedTarget as Node))
-                        setDragging(false);
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      setDragging(false);
-                      addFiles(e.dataTransfer.files);
-                    }}
                   >
                     {files.length ? (
                       <>
                         <div className="files-heading">
                           <div>
-                            <strong>
-                              {files.length}{" "}
-                              {files.length === 1 ? "datoteka" : "datoteka"}
-                            </strong>
+                            <strong>{formatFileCount(files.length)}</strong>
                             <span>{formatBytes(totalSize)} od 2 GB</span>
                           </div>
                           <button
@@ -680,10 +871,30 @@ export default function App() {
                               className="file-row"
                               key={`${file.name}-${file.size}-${index}`}
                             >
-                              <FileIcon name={file.name} />
+                              {canPreview(file) ? (
+                                <FileThumbnail file={file} />
+                              ) : (
+                                <FileIcon name={file.name} />
+                              )}
                               <div>
-                                <strong>{file.name}</strong>
-                                <span>{formatBytes(file.size)}</span>
+                                {canPreview(file) ? (
+                                  <button
+                                    type="button"
+                                    className="file-name-button"
+                                    onClick={() => setPreviewFile(file)}
+                                    title={`Pregledaj ${file.name}`}
+                                  >
+                                    {file.name}
+                                  </button>
+                                ) : (
+                                  <strong title={file.name}>{file.name}</strong>
+                                )}
+                                <span>
+                                  {formatBytes(file.size)}
+                                  {canPreview(file)
+                                    ? " · Klikni za pregled"
+                                    : ""}
+                                </span>
                               </div>
                               <button
                                 type="button"
@@ -697,6 +908,36 @@ export default function App() {
                               </button>
                             </div>
                           ))}
+                        </div>
+                        <div className="selection-summary">
+                          <div
+                            className="selection-progress"
+                            role="meter"
+                            aria-label="Iskorišteni prostor prijenosa"
+                            aria-valuenow={totalSize}
+                            aria-valuemin={0}
+                            aria-valuemax={LIMIT}
+                          >
+                            <span
+                              style={{
+                                width: `${Math.max(1, (totalSize / LIMIT) * 100)}%`,
+                              }}
+                            />
+                          </div>
+                          <div className="selection-footer">
+                            <span>
+                              {formatBytes(LIMIT - totalSize)} slobodno
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFiles([]);
+                                setError("");
+                              }}
+                            >
+                              Ukloni sve
+                            </button>
+                          </div>
                         </div>
                         <button
                           type="button"
@@ -717,7 +958,11 @@ export default function App() {
                             <Plus size={29} strokeWidth={1.5} />
                           </span>
                           <h1>
-                            {dragging ? "Pusti ih ovdje." : "Dodaj datoteke"}
+                            {readingDrop
+                              ? "Čitamo datoteke…"
+                              : dragging
+                                ? "Pusti ih ovdje."
+                                : "Dodaj datoteke"}
                           </h1>
                         </button>
                         <p>ili ih jednostavno povuci ovdje</p>
@@ -762,10 +1007,31 @@ export default function App() {
                       className="mode-tabs"
                       role="tablist"
                       aria-label="Način dijeljenja"
+                      onKeyDown={(event) => {
+                        if (
+                          ["ArrowLeft", "ArrowRight", "Home", "End"].includes(
+                            event.key,
+                          )
+                        ) {
+                          event.preventDefault();
+                          const next =
+                            event.key === "Home"
+                              ? "link"
+                              : event.key === "End"
+                                ? "email"
+                                : mode === "link"
+                                  ? "email"
+                                  : "link";
+                          setMode(next);
+                          document.getElementById(`mode-${next}`)?.focus();
+                        }
+                      }}
                     >
                       <button
                         type="button"
                         role="tab"
+                        id="mode-link"
+                        tabIndex={mode === "link" ? 0 : -1}
                         aria-selected={mode === "link"}
                         className={mode === "link" ? "active" : ""}
                         onClick={() => setMode("link")}
@@ -775,6 +1041,8 @@ export default function App() {
                       <button
                         type="button"
                         role="tab"
+                        id="mode-email"
+                        tabIndex={mode === "email" ? 0 : -1}
                         aria-selected={mode === "email"}
                         className={mode === "email" ? "active" : ""}
                         onClick={() => setMode("email")}
@@ -863,10 +1131,20 @@ export default function App() {
                         {error}
                       </p>
                     )}
-                    <button className="primary-button" type="submit">
-                      {mode === "link"
-                        ? "Izradi poveznicu"
-                        : "Pripremi prijenos"}
+                    <button
+                      className="primary-button"
+                      type="submit"
+                      disabled={serviceState !== "ready" || readingDrop}
+                    >
+                      {serviceState === "checking"
+                        ? "Provjeravamo vezu…"
+                        : serviceState !== "ready"
+                          ? "Slanje trenutačno nedostupno"
+                          : readingDrop
+                            ? "Čitamo datoteke…"
+                            : mode === "link"
+                              ? "Izradi poveznicu"
+                              : "Pripremi prijenos"}
                       <ArrowRight size={19} />
                     </button>
                     <div className="card-security">
@@ -977,7 +1255,7 @@ export default function App() {
       <footer className="footer">
         <div className="footer-left">
           <span className="footer-copyright">
-            © {new Date().getFullYear()} WeTransfer
+            © {new Date().getFullYear()} WT Transfer
           </span>
           <span className="footer-dot">·</span>
           <button onClick={() => setModal("privacy")}>Privatnost</button>
@@ -1011,6 +1289,11 @@ export default function App() {
           <Check size={17} />
           {toast}
         </div>
+      )}
+      {previewFile && (
+        <Modal title={previewFile.name} onClose={closePreview} wide>
+          <FilePreview file={previewFile} />
+        </Modal>
       )}
       {modal && (
         <Modal
@@ -1167,15 +1450,35 @@ export default function App() {
                   <LockKeyhole size={18} /> Zaštiti lozinkom{" "}
                   <small>Neobavezno</small>
                 </span>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Unesi lozinku"
-                  maxLength={128}
-                  autoComplete="new-password"
-                />
-                <p>Podijeli lozinku s primateljem zasebno od poveznice.</p>
+                <div className="password-input-wrap">
+                  <input
+                    type={passwordVisible ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Unesi lozinku"
+                    maxLength={128}
+                    autoComplete="new-password"
+                  />
+                  <button
+                    type="button"
+                    className="icon-button password-visibility"
+                    aria-label={
+                      passwordVisible ? "Sakrij lozinku" : "Prikaži lozinku"
+                    }
+                    onClick={(event) => {
+                      event.preventDefault();
+                      setPasswordVisible((value) => !value);
+                    }}
+                  >
+                    {passwordVisible ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+                <p>
+                  {password && password.length < 8
+                    ? "Za bolju zaštitu preporučujemo barem 8 znakova. "
+                    : ""}
+                  Podijeli lozinku s primateljem zasebno od poveznice.
+                </p>
               </label>
               <button className="primary-button" onClick={closeModal}>
                 Spremi postavke <Check size={18} />
@@ -1183,88 +1486,12 @@ export default function App() {
             </>
           )}
           {modal === "history" && (
-            <>
-              <p className="modal-lead">
-                Ideje koje si već poslao u svijet.
-                <br />
-                <small>Povijest je spremljena u ovom pregledniku.</small>
-              </p>
-              {history.length ? (
-                <div className="history-list">
-                  {history.map((item) => {
-                    const expired = new Date(item.expiresAt) < new Date();
-                    return (
-                      <div className="history-item" key={item.id}>
-                        <span className="history-icon">
-                          <File size={22} />
-                        </span>
-                        <div className="history-info">
-                          <strong>
-                            {item.title ||
-                              item.files?.[0]?.name ||
-                              "Prijenos bez naslova"}
-                          </strong>
-                          <span>
-                            {item.files?.length || 0} datoteka ·{" "}
-                            {formatBytes(item.totalSize)} ·{" "}
-                            {expired
-                              ? "Isteklo"
-                              : `Do ${formatDate(item.expiresAt)}`}
-                          </span>
-                        </div>
-                        {!expired && (
-                          <>
-                            <button
-                              className="icon-button"
-                              aria-label="Kopiraj poveznicu prijenosa"
-                              onClick={() => copyLink(item.id)}
-                            >
-                              <Copy size={16} />
-                            </button>
-                            <a
-                              className="icon-button"
-                              href={`/t/${item.id}`}
-                              aria-label="Otvori prijenos"
-                            >
-                              <ExternalLink size={16} />
-                            </a>
-                          </>
-                        )}
-                        <button
-                          className="icon-button"
-                          aria-label="Ukloni iz povijesti"
-                          onClick={() => {
-                            const updated = history.filter(
-                              (h) => h.id !== item.id,
-                            );
-                            setHistory(updated);
-                            try {
-                              localStorage.setItem(
-                                "we-transfer-history",
-                                JSON.stringify(updated),
-                              );
-                            } catch {
-                              /* optional history */
-                            }
-                          }}
-                        >
-                          <X size={16} />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="history-empty">
-                  <Send size={39} strokeWidth={1.2} />
-                  <h3>Tvoja sljedeća ideja ide prva.</h3>
-                  <p>Kad napraviš prvi prijenos, pojavit će se ovdje.</p>
-                  <button className="primary-button" onClick={closeModal}>
-                    Napravi prvi prijenos <ArrowRight size={18} />
-                  </button>
-                </div>
-              )}
-            </>
+            <TransferHistory
+              items={history}
+              onChange={updateHistory}
+              onCopy={copyLink}
+              onClose={closeModal}
+            />
           )}
           {modal === "privacy" && (
             <div className="legal-copy">

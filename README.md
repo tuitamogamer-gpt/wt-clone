@@ -20,15 +20,18 @@ Produkcijsko pokretanje poslužuje sučelje i API na portu 3001. Port se može p
 
 ## Mogućnosti
 
-- Učitavanje povlačenjem ili odabirom datoteka i mapa; najviše 100 datoteka i ukupno 2 GiB po prijenosu.
+- Učitavanje povlačenjem bilo gdje na stranici ili odabirom datoteka i mapa, uključujući podmape; najviše 100 datoteka i ukupno 2 GiB po prijenosu.
 - Stvarne, trajno pohranjene datoteke i poveznice `/t/:id`; lokalni disk za razvoj ili privatni Vercel Blob za hosting.
 - Pojedinačno preuzimanje ili ZIP cijelog prijenosa.
 - Rok valjanosti od 1, 3 ili 7 dana, provjeren pri svakom pristupu.
 - Opcionalna lozinka sa scrypt hashiranjem, ograničenjem pokušaja i privremenim potpisanim tokenom za preuzimanje.
 - Prikaz napretka i otkazivanje učitavanja.
 - E-pošta preko `mailto:` poveznice: priprema poruke u korisnikovoj aplikaciji. Nema automatskog slanja e-pošte ni SMTP integracije.
-- Povijest posljednjih 30 prijenosa u lokalnoj pohrani preglednika. Uklanjanje iz povijesti ne briše prijenos.
-- Originalna SVG ilustracija, tri boje pozadine, pomoć, mobilno sučelje i podrška smanjenom kretanju.
+- Povijest posljednjih 30 prijenosa s pretragom, filtrima aktivnih i isteklih prijenosa te poništavanjem uklanjanja. Sprema se samo provjereni prikazni sadržaj, bez lozinki ili tokena. Uklanjanje iz povijesti ne briše prijenos.
+- Lokalni pregledi rasterskih slika do 20 MiB, pregled zauzeća i brisanje odabira jednim klikom.
+- Provjera dostupnosti usluge prije slanja, obavijest o offline stanju i ponovni pokušaj bez gubitka odabranih datoteka. Odabir i pregled ne prenose datoteke na poslužitelj.
+- Vlastiti WT Transfer identitet, originalna SVG ilustracija i tri boje pozadine koje se pamte u pregledniku.
+- Sučelje od 320 px, veći dodirni elementi, navigacija tipkovnicom, pomoć i podrška smanjenom kretanju.
 
 ## Provjera
 
@@ -39,7 +42,7 @@ npm run build
 
 Integracijski testovi koriste privremenu mapu i pokrivaju stvarne sadržaje datoteka i ZIP-a, ponovno pokretanje, zaštitu lozinkom, istek, ograničenja veličine i broja datoteka, hrvatske nazive i čišćenje neuspjelih prijenosa.
 
-Za pregledničke provjere pokreni aplikaciju, zatim `npm run test:e2e`. Testovi koriste Chromium na `/usr/bin/chromium`; drugu lokaciju možeš zadati varijablom `CHROMIUM_PATH`, a URL aplikacije varijablom `E2E_BASE_URL`.
+Za pregledničke provjere pokreni aplikaciju, zatim `npm run test:e2e` i `npm run test:ux`. Testovi koriste Chromium na `/usr/bin/chromium`; drugu lokaciju možeš zadati varijablom `CHROMIUM_PATH`, a URL aplikacije varijablom `E2E_BASE_URL`.
 
 ## Vercel deployment
 

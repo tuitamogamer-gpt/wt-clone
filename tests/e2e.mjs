@@ -14,6 +14,7 @@ const contexts = [];
 
 async function context() {
   const result = await browser.newContext({ acceptDownloads: true, viewport: { width: 1440, height: 1000 } });
+  result.setDefaultTimeout(15_000);
   contexts.push(result);
   result.on('page', (page) => page.on('pageerror', error => errors.push(error.message)));
   return result;
@@ -96,7 +97,7 @@ try {
   await sender.getByRole('button', { name: 'Moji prijenosi' }).click();
   let dialog = sender.getByRole('dialog');
   await dialog.getByText(regular.title, { exact: true }).waitFor();
-  assert.equal(await dialog.getByRole('link', { name: 'Otvori prijenos' }).getAttribute('href'), `/t/${regular.id}`);
+  assert.equal(await dialog.getByRole('link', { name: `Otvori prijenos u novoj kartici: ${regular.title}`, exact: true }).getAttribute('href'), `/t/${regular.id}`);
   await sender.keyboard.press('Escape');
   await sender.getByRole('button', { name: 'Pošalji još nešto' }).click();
   await chooseFiles(sender, { name: 'tajna.txt', mimeType: 'text/plain', buffer: Buffer.from('Samo za tebe.') });
@@ -130,7 +131,10 @@ try {
   await privateRecipient.getByRole('link', { name: 'Preuzmi sve' }).waitFor();
   assert.equal((await download(privateRecipient, 'Preuzmi tajna.txt')).bytes.toString(), 'Samo za tebe.');
   assert.equal(zipEntries((await download(privateRecipient, 'Preuzmi sve')).bytes).get('tajna.txt'), 'Samo za tebe.');
-  assert.equal(await privateRecipient.evaluate(() => localStorage.length), 0);
+  const recipientStorage = await privateRecipient.evaluate(() => ({ ...localStorage }));
+  assert.deepEqual(Object.keys(recipientStorage).filter(key => key !== 'wt-theme'), []);
+  assert.equal(JSON.stringify(recipientStorage).includes('Testna-lozinka-987!'), false);
+  assert.equal(JSON.stringify(recipientStorage).includes('"token"'), false);
   await privateRecipient.reload();
   await privateRecipient.getByRole('textbox', { name: 'Lozinka', exact: true }).waitFor();
   console.log('PASS: protected metadata, wrong/correct password, original/ZIP downloads, no persisted password or token');
@@ -155,9 +159,9 @@ try {
   await sender.reload();
   await sender.getByRole('button', { name: 'Moji prijenosi' }).click();
   dialog = sender.getByRole('dialog');
-  assert.equal(await dialog.locator('.history-item').count(), 3);
-  await dialog.getByRole('button', { name: 'Ukloni iz povijesti' }).first().click();
-  assert.equal(await dialog.locator('.history-item').count(), 2);
+  assert.equal(await dialog.locator('.th-item').count(), 3);
+  await dialog.getByRole('button', { name: `Ukloni iz povijesti: ${emailTransfer.title}`, exact: true }).click();
+  assert.equal(await dialog.locator('.th-item').count(), 2);
   const stillAvailable = await sender.request.get(`${baseUrl}/api/transfers/${emailTransfer.id}`);
   assert.equal(stillAvailable.status(), 200);
   await sender.keyboard.press('Escape');
