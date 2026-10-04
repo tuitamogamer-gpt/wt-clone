@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
+import { createTransfer } from "./create-transfer";
+import type { Transfer } from "./create-transfer";
 import {
   ArrowUpRight,
   ArrowRight,
@@ -30,17 +32,6 @@ import {
   ExternalLink,
 } from "lucide-react";
 
-type TransferFile = { id: string; name: string; size: number; type: string };
-type Transfer = {
-  id: string;
-  title: string;
-  message: string;
-  files: TransferFile[];
-  totalSize: number;
-  createdAt: string;
-  expiresAt: string;
-  requiresPassword?: boolean;
-};
 type ModalName =
   | "how"
   | "about"
@@ -203,7 +194,7 @@ export default function App() {
   const [unlocking, setUnlocking] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
-  const xhrRef = useRef<XMLHttpRequest | null>(null);
+  const uploadController = useRef<AbortController | null>(null);
   const totalSize = files.reduce((sum, file) => sum + file.size, 0);
   const downloadId = window.location.pathname.match(
     /^\/t\/([a-zA-Z0-9_-]+)\/?$/,
@@ -293,7 +284,7 @@ export default function App() {
     setProgress(0);
     setPassword("");
   }
-  function upload(event: FormEvent) {
+  async function upload(event: FormEvent) {
     event.preventDefault();
     setError("");
     if (!files.length) {
@@ -304,58 +295,45 @@ export default function App() {
       setError("Upiši svoju i primateljevu e-adresu.");
       return;
     }
-    const body = new FormData();
-    files.forEach((file) => body.append("files", file));
-    body.append("title", title.trim());
-    body.append("message", message.trim());
-    body.append("expiresIn", expires);
-    if (password) body.append("password", password);
-    if (mode === "email") {
-      body.append("sender", sender);
-      body.append("recipient", recipient);
-    }
-    const xhr = new XMLHttpRequest();
-    xhrRef.current = xhr;
-    xhr.open("POST", "/api/transfers");
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable)
-        setProgress(Math.round((e.loaded / e.total) * 100));
-    };
-    xhr.onload = () => {
-      let data;
-      try {
-        data = JSON.parse(xhr.responseText);
-      } catch {
-        setError("Poslužitelj nije dostupan. Pokušaj ponovno.");
-        setStatus("idle");
-        return;
-      }
-      if (xhr.status >= 200 && xhr.status < 300) {
-        setCreated(data);
-        setStatus("success");
-        const updated = [data, ...getHistory()].slice(0, 30);
-        setHistory(updated);
-        try {
-          localStorage.setItem("we-transfer-history", JSON.stringify(updated));
-        } catch {
-          /* The transfer still works without local history. */
-        }
-      } else {
-        setError(data.error || "Prijenos nije uspio. Pokušaj ponovno.");
-        setStatus("idle");
-      }
-    };
-    xhr.onerror = () => {
-      setError("Veza je prekinuta. Provjeri internet i pokušaj ponovno.");
-      setStatus("idle");
-    };
-    xhr.onabort = () => {
-      setStatus("idle");
-      setProgress(0);
-    };
+    const controller = new AbortController();
+    uploadController.current = controller;
     setStatus("uploading");
     setProgress(0);
-    xhr.send(body);
+    try {
+      const data = await createTransfer(
+        {
+          files,
+          title: title.trim(),
+          message: message.trim(),
+          expiresIn: expires,
+          password,
+          ...(mode === "email" ? { sender, recipient } : {}),
+        },
+        setProgress,
+        controller.signal,
+      );
+      setCreated(data);
+      setStatus("success");
+      const updated = [data, ...getHistory()].slice(0, 30);
+      setHistory(updated);
+      try {
+        localStorage.setItem("we-transfer-history", JSON.stringify(updated));
+      } catch {
+        /* History is optional. */
+      }
+    } catch (err) {
+      setStatus("idle");
+      setProgress(0);
+      if (!controller.signal.aborted)
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Prijenos nije uspio. Pokušaj ponovno.",
+        );
+    } finally {
+      if (uploadController.current === controller)
+        uploadController.current = null;
+    }
   }
   async function unlock(event: FormEvent) {
     event.preventDefault();
@@ -579,7 +557,7 @@ export default function App() {
                   </div>
                   <button
                     className="text-button"
-                    onClick={() => xhrRef.current?.abort()}
+                    onClick={() => uploadController.current?.abort()}
                   >
                     Otkaži prijenos
                   </button>

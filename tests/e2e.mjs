@@ -24,7 +24,7 @@ async function chooseFiles(page, payload) {
   await (await chooserPromise).setFiles(payload);
 }
 async function submit(page, buttonName = 'Izradi poveznicu') {
-  const responsePromise = page.waitForResponse(response => response.url().endsWith('/api/transfers') && response.request().method() === 'POST');
+  const responsePromise = page.waitForResponse(response => (/\/api\/transfers$/.test(response.url()) || /\/api\/transfers\/[^/]+\/complete$/.test(response.url())) && response.request().method() === 'POST');
   await page.getByRole('button', { name: buttonName, exact: true }).click();
   const response = await responsePromise;
   assert.equal(response.status(), 201, await response.text());

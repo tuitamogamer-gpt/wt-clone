@@ -155,6 +155,8 @@ export async function createApp(options = {}) {
     }
   }
 
+  app.get('/api/config', (_req, res) => res.json({ uploadMode: 'local' }));
+
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
   app.post('/api/transfers', asyncRoute(async (req, res, next) => {
