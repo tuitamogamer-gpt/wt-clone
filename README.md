@@ -1,4 +1,4 @@
-# WeTransfer clone
+# wt-clone
 
 Samostalna aplikacija za dijeljenje datoteka s responzivnim sučeljem na hrvatskom. React 19, TypeScript i Vite na klijentu; Express, Multer i Archiver na poslužitelju.
 
